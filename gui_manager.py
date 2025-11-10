@@ -22,18 +22,18 @@ class GUIManager:
         self.include_logic = None
         self.include_interface = None
         self.include_enums = None
-        self.output_format = None
 
-    def start_application(self, mermaid_processor):
+    def start_application(self, mermaid_processor, drawio_processor):
         """Start the main application flow"""
         self.mermaid_processor = mermaid_processor
+        self.drawio_processor = drawio_processor
         self.show_initial_gui()
 
     def show_initial_gui(self):
         """Show initial GUI for file selection and options"""
         self.initial_root = tk.Tk()
-        self.initial_root.title("PLCopen XML to Mermaid Converter")
-        self.initial_root.geometry("500x400")
+        self.initial_root.title("PLCopen XML to Diagram Converter")
+        self.initial_root.geometry("550x450")
 
         # Center the window
         self._center_window(self.initial_root)
@@ -43,14 +43,14 @@ class GUIManager:
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Title
-        title_label = ttk.Label(main_frame, text="PLCopen XML to Mermaid Converter",
+        title_label = ttk.Label(main_frame, text="PLCopen XML to Diagram Converter",
                                 font=('Arial', 16, 'bold'))
         title_label.pack(pady=10)
 
         # Description
         desc_label = ttk.Label(main_frame,
-                               text="Convert CODESYS PLCopen XML exports to Mermaid flowcharts",
-                               font=('Arial', 10))
+                               text="Convert CODESYS PLCopen XML exports to Mermaid flowcharts and Draw.io diagrams",
+                               font=('Arial', 10), wraplength=500)
         desc_label.pack(pady=5)
 
         # Options frame
@@ -58,24 +58,41 @@ class GUIManager:
         options_frame.pack(fill=tk.X, pady=20)
 
         # Output format selection
-        self.output_format = tk.StringVar(value="mermaid")
         format_frame = ttk.Frame(options_frame)
         format_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(format_frame, text="Output Format:").pack(side=tk.LEFT)
-        ttk.Radiobutton(format_frame, text="Mermaid", variable=self.output_format,
-                        value="mermaid").pack(side=tk.LEFT, padx=10)
+        ttk.Label(format_frame, text="Output Formats:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+
+        # Multiple format selection
+        format_subframe = ttk.Frame(format_frame)
+        format_subframe.pack(fill=tk.X, padx=20)
+
+        self.include_mermaid = tk.BooleanVar(value=True)
+        self.include_drawio = tk.BooleanVar(value=False)
+
+        ttk.Checkbutton(format_subframe, text="Mermaid (.mmd files)",
+                        variable=self.include_mermaid).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(format_subframe, text="Draw.io (.drawio files)",
+                        variable=self.include_drawio).pack(side=tk.LEFT, padx=10)
 
         # Include options
+        include_frame = ttk.Frame(options_frame)
+        include_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(include_frame, text="Content to Include:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+
+        include_subframe = ttk.Frame(include_frame)
+        include_subframe.pack(fill=tk.X, padx=20)
+
         self.include_logic = tk.BooleanVar(value=True)
         self.include_interface = tk.BooleanVar(value=True)
         self.include_enums = tk.BooleanVar(value=True)
 
-        ttk.Checkbutton(options_frame, text="Include Logic Flowcharts",
+        ttk.Checkbutton(include_subframe, text="Include Logic Flowcharts",
                         variable=self.include_logic).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Include Interface Diagrams",
+        ttk.Checkbutton(include_subframe, text="Include Interface Diagrams",
                         variable=self.include_interface).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Include Enumerators",
+        ttk.Checkbutton(include_subframe, text="Include Enumerators",
                         variable=self.include_enums).pack(anchor=tk.W, pady=2)
 
         # File selection section
@@ -84,7 +101,7 @@ class GUIManager:
 
         self.selected_file = tk.StringVar(value="No file selected")
         file_status = ttk.Label(file_frame, textvariable=self.selected_file,
-                                foreground="blue", wraplength=400)
+                                foreground="blue", wraplength=500)
         file_status.pack(anchor=tk.W, pady=5)
 
         button_frame = ttk.Frame(file_frame)
@@ -134,6 +151,11 @@ class GUIManager:
             messagebox.showerror("Error", "Please select an XML file first")
             return
 
+        # Validate format selection
+        if not self.include_mermaid.get() and not self.include_drawio.get():
+            messagebox.showerror("Error", "Please select at least one output format (Mermaid or Draw.io)")
+            return
+
         self.status_var.set("Parsing XML file...")
         self.initial_root.update()
 
@@ -150,10 +172,19 @@ class GUIManager:
         # Get output directory
         output_dir = filedialog.askdirectory(title="Select Output Directory")
         if not output_dir:
-            output_dir = "mermaid_output"
+            output_dir = "diagram_output"
 
-        # Convert to Mermaid
-        self._convert_to_mermaid(selected_id, output_dir)
+        # Convert to selected formats
+        self._convert_to_formats(selected_id, output_dir)
+
+    def _get_selected_formats(self) -> List[str]:
+        """Get list of selected output formats"""
+        formats = []
+        if self.include_mermaid.get():
+            formats.append('mermaid')
+        if self.include_drawio.get():
+            formats.append('drawio')
+        return formats
 
     def _parse_xml_structure(self) -> bool:
         """Parse XML file and identify structure"""
@@ -324,7 +355,10 @@ class GUIManager:
 
     def _show_component_browser(self) -> Optional[str]:
         """Show component browser and return selected ObjectID"""
-        browser_root = tk.Toplevel()  # Use Toplevel instead of Tk for secondary window
+        logger.info("Opening component browser...")
+
+        # Create the browser window
+        browser_root = tk.Toplevel(self.initial_root)
         browser_root.title("Component Browser - Select Component to Convert")
         browser_root.geometry("1000x700")
         self._center_window(browser_root)
@@ -336,7 +370,8 @@ class GUIManager:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Title
-        title_label = ttk.Label(main_frame, text="Select a Component to Convert",
+        title_label = ttk.Label(main_frame,
+                                text=f"Select a Component to Convert ({len(self.object_ids)} components found)",
                                 font=('Arial', 12, 'bold'))
         title_label.pack(pady=10)
 
@@ -351,19 +386,26 @@ class GUIManager:
         # Populate components tab
         self._populate_components_tab(components_frame, selected_object_id, browser_root)
 
-        # Control buttons at bottom
+        # Control buttons at bottom - ONLY CANCEL BUTTON
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill=tk.X, pady=10)
 
-        ttk.Button(control_frame, text="Cancel",
-                   command=browser_root.destroy).pack(side=tk.RIGHT, padx=5)
+        cancel_button = ttk.Button(control_frame, text="Cancel",
+                                   command=browser_root.destroy)
+        cancel_button.pack(side=tk.RIGHT, padx=5)
 
         # Wait for the browser window to close
         browser_root.transient(self.initial_root)
         browser_root.grab_set()
+        browser_root.focus_set()
+
+        logger.info("Component browser displayed, waiting for user selection...")
         self.initial_root.wait_window(browser_root)
 
-        return selected_object_id.get() if selected_object_id.get() else None
+        selected_id = selected_object_id.get()
+        logger.info(f"User selected component: {selected_id}")
+
+        return selected_id if selected_id else None
 
     def _populate_components_tab(self, parent, selected_object_id, root_window):
         """Populate the all components tab"""
@@ -390,12 +432,12 @@ class GUIManager:
         list_frame = ttk.Frame(left_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.listbox = tk.Listbox(list_frame, font=('Arial', 10))
-        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        listbox = tk.Listbox(list_frame, font=('Arial', 10))
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        list_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
+        list_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=listbox.yview)
         list_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.listbox.configure(yscrollcommand=list_scroll.set)
+        listbox.configure(yscrollcommand=list_scroll.set)
 
         # Right panel - Details
         right_frame = ttk.Frame(paned_window)
@@ -403,13 +445,15 @@ class GUIManager:
 
         ttk.Label(right_frame, text="Component Details:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=5)
 
-        self.details_text = tk.Text(right_frame, wrap=tk.WORD, font=('Arial', 10))
-        self.details_text.pack(fill=tk.BOTH, expand=True, pady=5)
+        details_text = tk.Text(right_frame, wrap=tk.NONE, font=('Arial', 10))
+        details_text.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # Add scrollbar to details text
-        details_scroll = ttk.Scrollbar(self.details_text, orient=tk.VERTICAL, command=self.details_text.yview)
-        details_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.details_text.configure(yscrollcommand=details_scroll.set)
+        # Add scrollbars to details text
+        v_scrollbar = ttk.Scrollbar(details_text, orient=tk.VERTICAL, command=details_text.yview)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        h_scrollbar = ttk.Scrollbar(details_text, orient=tk.HORIZONTAL, command=details_text.xview)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        details_text.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
 
         # Populate listbox
         component_list = []
@@ -418,92 +462,103 @@ class GUIManager:
             component_list.append((display_text, obj_id))
 
         component_list.sort(key=lambda x: x[0])
+
         for display_text, obj_id in component_list:
-            self.listbox.insert(tk.END, display_text)
+            listbox.insert(tk.END, display_text)
 
-        self.component_map = {display_text: obj_id for display_text, obj_id in component_list}
+        component_map = {display_text: obj_id for display_text, obj_id in component_list}
 
-        # Bind events
-        self.listbox.bind('<<ListboxSelect>>', lambda e: self._on_list_select(e, selected_object_id))
-        self.listbox.bind('<Double-1>', lambda e: self._on_list_double_click(e, selected_object_id, root_window))
+        def show_object_details(obj_id):
+            """Show details for selected object"""
+            details_text.delete(1.0, tk.END)
+
+            if obj_id and obj_id in self.object_ids:
+                obj_info = self.object_ids[obj_id]
+                details_text.insert(tk.END, f"Name: {obj_info['name']}\n")
+                details_text.insert(tk.END, f"Type: {obj_info['type']}\n")
+                details_text.insert(tk.END, f"ObjectID: {obj_id}\n")
+                details_text.insert(tk.END, f"Description: {obj_info['description']}\n")
+
+                if obj_info.get('parent'):
+                    details_text.insert(tk.END, f"Parent: {obj_info['parent']}\n")
+
+                # Show ST code preview if available
+                element = obj_info['element']
+                body = element.find(f"{self.namespace}body")
+                if body is not None:
+                    st_elem = body.find(f"{self.namespace}ST")
+                    if st_elem is not None and st_elem.text:
+                        st_preview = st_elem.text.strip()
+                        if st_preview:
+                            details_text.insert(tk.END, f"\nST Code Preview:\n{st_preview[:500]}...\n")
+
+                details_text.insert(tk.END, f"\n\nDouble-click to select or click 'Select Component'")
+
+        def on_list_select(event):
+            """Handle list selection"""
+            selection = listbox.curselection()
+            if selection:
+                display_text = listbox.get(selection[0])
+                obj_id = component_map.get(display_text)
+                if obj_id:
+                    show_object_details(obj_id)
+
+        def on_list_double_click(event):
+            """Handle list double click"""
+            selection = listbox.curselection()
+            if selection:
+                display_text = listbox.get(selection[0])
+                obj_id = component_map.get(display_text)
+                if obj_id:
+                    selected_object_id.set(obj_id)
+                    root_window.destroy()
+
+        def on_select_button():
+            """Handle select button click - FIXED: Now properly sets selection and closes window"""
+            selection = listbox.curselection()
+            if selection:
+                display_text = listbox.get(selection[0])
+                obj_id = component_map.get(display_text)
+                if obj_id:
+                    logger.info(f"Select button clicked - setting selection to: {obj_id}")
+                    selected_object_id.set(obj_id)
+                    root_window.destroy()  # This will close the browser and proceed to output directory
+            else:
+                messagebox.showwarning("Warning", "Please select a component first")
 
         def on_filter_change(*args):
             filter_text = filter_var.get().lower()
-            self.listbox.delete(0, tk.END)
+            listbox.delete(0, tk.END)
             for display_text, obj_id in component_list:
                 if filter_text in display_text.lower():
-                    self.listbox.insert(tk.END, display_text)
+                    listbox.insert(tk.END, display_text)
 
-        # Use trace_add for newer Tk versions
+        # Bind events
+        listbox.bind('<<ListboxSelect>>', on_list_select)
+        listbox.bind('<Double-1>', on_list_double_click)
         filter_var.trace_add('write', on_filter_change)
 
-        # Select button
-        select_button = ttk.Button(left_frame, text="Select Component",
-                                   command=lambda: self._on_select_button(selected_object_id, root_window))
-        select_button.pack(pady=10)
+        # Add the select button INSIDE the left frame
+        select_button_frame = ttk.Frame(left_frame)
+        select_button_frame.pack(fill=tk.X, pady=10)
 
-    def _on_list_select(self, event, selected_object_id):
-        """Handle list selection"""
-        selection = self.listbox.curselection()
-        if selection:
-            display_text = self.listbox.get(selection[0])
-            obj_id = self.component_map.get(display_text)
-            if obj_id:
-                self._show_object_details(obj_id)
+        select_button = ttk.Button(select_button_frame, text="Select Component",
+                                   command=on_select_button)
+        select_button.pack(pady=5)
 
-    def _on_list_double_click(self, event, selected_object_id, root_window):
-        """Handle list double click"""
-        selection = self.listbox.curselection()
-        if selection:
-            display_text = self.listbox.get(selection[0])
-            obj_id = self.component_map.get(display_text)
-            if obj_id:
-                selected_object_id.set(obj_id)
-                root_window.destroy()
+        # Select the first item by default
+        if component_list:
+            listbox.selection_set(0)
+            listbox.activate(0)
+            first_display_text = listbox.get(0)
+            first_obj_id = component_map.get(first_display_text)
+            if first_obj_id:
+                show_object_details(first_obj_id)
 
-    def _on_select_button(self, selected_object_id, root_window):
-        """Handle select button click"""
-        selection = self.listbox.curselection()
-        if selection:
-            display_text = self.listbox.get(selection[0])
-            obj_id = self.component_map.get(display_text)
-            if obj_id:
-                selected_object_id.set(obj_id)
-                root_window.destroy()
-        else:
-            messagebox.showwarning("Warning", "Please select a component first")
-
-    def _show_object_details(self, object_id):
-        """Show details for selected object"""
-        self.details_text.delete(1.0, tk.END)
-
-        if object_id and object_id in self.object_ids:
-            obj_info = self.object_ids[object_id]
-            self.details_text.insert(tk.END, f"Name: {obj_info['name']}\n")
-            self.details_text.insert(tk.END, f"Type: {obj_info['type']}\n")
-            self.details_text.insert(tk.END, f"ObjectID: {object_id}\n")
-            self.details_text.insert(tk.END, f"Description: {obj_info['description']}\n")
-
-            if obj_info.get('parent'):
-                self.details_text.insert(tk.END, f"Parent: {obj_info['parent']}\n")
-
-            # Show ST code preview
-            element = obj_info['element']
-            body = element.find(f"{self.namespace}body")
-            if body is not None:
-                st_elem = body.find(f"{self.namespace}ST")
-                if st_elem is not None and st_elem.text:
-                    st_preview = st_elem.text.strip()
-                    if st_preview:
-                        self.details_text.insert(tk.END, f"\nST Code Preview:\n{st_preview}\n")
-
-            self.details_text.insert(tk.END, f"\n\nDouble-click or click 'Select Component' to choose this component")
-        else:
-            self.details_text.insert(tk.END, "No component selected")
-
-    def _convert_to_mermaid(self, object_id: str, output_dir: str):
-        """Convert selected component to Mermaid flowchart"""
-        logger.info(f"Converting ObjectID {object_id} to Mermaid...")
+    def _convert_to_formats(self, object_id: str, output_dir: str):
+        """Convert selected component to multiple formats"""
+        formats = self._get_selected_formats()
+        logger.info(f"Converting ObjectID {object_id} to formats: {formats}")
 
         if object_id not in self.object_ids:
             messagebox.showerror("Error", f"ObjectID {object_id} not found")
@@ -512,31 +567,85 @@ class GUIManager:
         # Get component info
         component_info = self.object_ids[object_id]
 
-        # Set namespace in mermaid processor
+        # Set namespace in processors
         self.mermaid_processor.set_namespace(self.namespace)
+        self.drawio_processor.set_namespace(self.namespace)
 
-        # Convert the main component
-        success = self.mermaid_processor.convert_component(
-            component_info,
-            output_dir,
-            include_logic=self.include_logic.get(),
-            include_interface=self.include_interface.get()
-        )
+        # Track success for each format
+        format_success = {}
+        files_created = []
+
+        # Convert to each selected format
+        for format_type in formats:
+            try:
+                if format_type == 'mermaid':
+                    success = self.mermaid_processor.convert_component(
+                        component_info,
+                        output_dir,
+                        include_logic=self.include_logic.get(),
+                        include_interface=self.include_interface.get()
+                    )
+                    format_success['mermaid'] = success
+                    if success:
+                        files_created.extend(self._get_created_files(output_dir, component_info['name'], 'mmd'))
+
+                elif format_type == 'drawio':
+                    success = self.drawio_processor.convert_component(
+                        component_info,
+                        output_dir,
+                        include_logic=self.include_logic.get(),
+                        include_interface=self.include_interface.get()
+                    )
+                    format_success['drawio'] = success
+                    if success:
+                        files_created.extend(self._get_created_files(output_dir, component_info['name'], 'drawio'))
+
+            except Exception as e:
+                logger.error(f"Error converting to {format_type} for {component_info['name']}: {str(e)}")
+                format_success[format_type] = False
 
         # If it's a POU, also convert all its actions
-        if success and component_info['type'] == 'POU':
-            self._convert_pou_actions(component_info, output_dir)
+        if any(format_success.values()) and component_info['type'] == 'POU':
+            self._convert_pou_actions(component_info, output_dir, formats)
 
-        if success:
-            logger.info(f"Successfully generated Mermaid files in {output_dir}")
-            messagebox.showinfo("Success", f"Mermaid files generated in:\n{output_dir}")
-            self.status_var.set("Conversion completed successfully")
+        # Show results
+        successful_formats = [f for f, success in format_success.items() if success]
+        if successful_formats:
+            format_names = {
+                'mermaid': 'Mermaid (.mmd)',
+                'drawio': 'Draw.io (.drawio)'
+            }
+            created_formats = [format_names[f] for f in successful_formats]
+
+            file_list = "\n".join([f"  • {os.path.basename(f)}" for f in files_created])
+
+            logger.info(f"Successfully generated files in {output_dir}")
+            messagebox.showinfo("Success",
+                                f"Files generated in:\n{output_dir}\n\n"
+                                f"Formats: {', '.join(created_formats)}\n\n"
+                                f"Created files:\n{file_list}")
+            self.status_var.set(f"Conversion completed - {len(successful_formats)} format(s) generated")
         else:
-            messagebox.showerror("Error", "Failed to generate Mermaid files")
+            messagebox.showerror("Error", "Failed to generate any files in the selected formats")
             self.status_var.set("Conversion failed")
 
-    def _convert_pou_actions(self, pou_info: Dict, output_dir: str):
-        """Convert all actions within a POU"""
+    def _get_created_files(self, output_dir: str, component_name: str, extension: str) -> List[str]:
+        """Get list of created files for a component"""
+        files = []
+        base_name = self._sanitize_filename(component_name)
+
+        logic_file = os.path.join(output_dir, f"{base_name}_logic.{extension}")
+        interface_file = os.path.join(output_dir, f"{base_name}_interface.{extension}")
+
+        if os.path.exists(logic_file):
+            files.append(logic_file)
+        if os.path.exists(interface_file):
+            files.append(interface_file)
+
+        return files
+
+    def _convert_pou_actions(self, pou_info: Dict, output_dir: str, formats: List[str]):
+        """Convert all actions within a POU to multiple formats"""
         pou_element = pou_info['element']
         pou_name = pou_info['name']
 
@@ -556,10 +665,29 @@ class GUIManager:
                     'parent': pou_info
                 }
 
-                # Convert the action
-                self.mermaid_processor.convert_component(
-                    action_info,
-                    output_dir,
-                    include_logic=self.include_logic.get(),
-                    include_interface=self.include_interface.get()
-                )
+                # Convert the action to each format
+                for format_type in formats:
+                    try:
+                        if format_type == 'mermaid':
+                            self.mermaid_processor.convert_component(
+                                action_info,
+                                output_dir,
+                                include_logic=self.include_logic.get(),
+                                include_interface=self.include_interface.get()
+                            )
+                        elif format_type == 'drawio':
+                            self.drawio_processor.convert_component(
+                                action_info,
+                                output_dir,
+                                include_logic=self.include_logic.get(),
+                                include_interface=self.include_interface.get()
+                            )
+                    except Exception as e:
+                        logger.error(f"Error converting action {action_name} to {format_type}: {str(e)}")
+
+    def _sanitize_filename(self, name: str) -> str:
+        """Sanitize filename by removing invalid characters"""
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            name = name.replace(char, '_')
+        return name

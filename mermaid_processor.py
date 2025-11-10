@@ -1,10 +1,6 @@
 import os
 import logging
 from typing import Dict, Optional, List
-from st_processor import STProcessor
-from ld_processor import LDProcessor
-from cfc_processor import CFCProcessor
-from fbd_processor import FBDProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +8,11 @@ logger = logging.getLogger(__name__)
 class MermaidProcessor:
     def __init__(self):
         self.namespace = ''
+        from st_processor import STProcessor
+        from ld_processor import LDProcessor
+        from cfc_processor import CFCProcessor
+        from fbd_processor import FBDProcessor
+
         self.st_processor = STProcessor()
         self.ld_processor = LDProcessor()
         self.cfc_processor = CFCProcessor()
@@ -37,7 +38,7 @@ class MermaidProcessor:
             name = component_info['name']
             comp_type = component_info['type']
 
-            logger.info(f"Converting {comp_type}: {name} to directory: {output_dir}")
+            logger.info(f"Converting {comp_type}: {name} to Mermaid in directory: {output_dir}")
 
             files_created = []
 
@@ -55,11 +56,11 @@ class MermaidProcessor:
                 files_created.extend(interface_files)
                 logger.debug(f"Interface files created: {interface_files}")
 
-            logger.info(f"Created {len(files_created)} files: {files_created}")
+            logger.info(f"Created {len(files_created)} Mermaid files: {files_created}")
             return len(files_created) > 0
 
         except Exception as e:
-            logger.error(f"Conversion failed for {component_info.get('name', 'unknown')}: {str(e)}")
+            logger.error(f"Mermaid conversion failed for {component_info.get('name', 'unknown')}: {str(e)}")
             return False
 
     def _convert_body_to_mermaid(self, element, name: str, output_dir: str) -> List[str]:
@@ -69,35 +70,86 @@ class MermaidProcessor:
         # Look for body in the element
         body = element.find(f"{self.namespace}body")
         if body is not None:
-            logger.debug(f"Found body for {name}")
+            logger.info(f"Found body for {name}, analyzing content...")
 
-            # Debug: Check what's in the body
-            logger.debug(f"Body children: {[child.tag for child in body]}")
+            # DEBUG: Log all children of body to see what's actually there
+            body_children = list(body)
+            logger.info(f"Body children tags for {name}: {[child.tag for child in body_children]}")
 
-            # Try different code formats
+            # DEBUG: Log the actual XML content of body
+            for i, child in enumerate(body_children):
+                logger.info(
+                    f"Body child {i}: {child.tag} - has text: {bool(child.text)} - text length: {len(child.text) if child.text else 0}")
+                if child.text:
+                    logger.info(f"First 200 chars of {child.tag}: {child.text[:200] if child.text else 'None'}")
+
+            # Parse code and convert to Mermaid
             mermaid_code = self._parse_code_body(body, name)
             if mermaid_code:
                 filename = os.path.join(output_dir, f"{self._sanitize_filename(name)}_logic.mmd")
                 with open(filename, 'w', encoding='utf-8') as f:
                     f.write(mermaid_code)
                 files_created.append(filename)
-                logger.info(f"Created logic file: {filename} with {len(mermaid_code)} characters")
+                logger.info(f"Created Mermaid logic file: {filename} with {len(mermaid_code)} characters")
             else:
                 logger.warning(f"No Mermaid code generated for body of {name}")
+                # Create a diagnostic Mermaid file
+                diagnostic_mermaid = self._create_diagnostic_mermaid(body, name)
+                if diagnostic_mermaid:
+                    filename = os.path.join(output_dir, f"{self._sanitize_filename(name)}_diagnostic.mmd")
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        f.write(diagnostic_mermaid)
+                    files_created.append(filename)
+                    logger.info(f"Created diagnostic file: {filename}")
         else:
             logger.warning(f"No body found for {name}")
 
         return files_created
 
+    def _convert_interface_to_mermaid(self, element, name: str, output_dir: str) -> list:
+        """Convert interface to Mermaid class diagram"""
+        files_created = []
+
+        interface = element.find(f"{self.namespace}interface")
+        if interface is not None:
+            logger.info(f"Found interface for {name}, analyzing variables...")
+
+            # DEBUG: Log interface structure
+            variables = interface.findall(f".//{self.namespace}variable")
+            logger.info(f"Found {len(variables)} variables in interface for {name}")
+
+            for i, var in enumerate(variables):
+                name_elem = var.find(f"{self.namespace}name")
+                type_elem = var.find(f"{self.namespace}type")
+                logger.info(
+                    f"Variable {i}: name={name_elem.text if name_elem else 'None'}, type={self._get_type_name(type_elem) if type_elem else 'None'}")
+
+            mermaid_code = self._parse_interface(interface, name)
+            if mermaid_code:
+                filename = os.path.join(output_dir, f"{self._sanitize_filename(name)}_interface.mmd")
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(mermaid_code)
+                files_created.append(filename)
+                logger.info(f"Created Mermaid interface file: {filename}")
+            else:
+                logger.warning(f"No interface diagram generated for {name} - no variables found")
+        else:
+            logger.warning(f"No interface found for {name}")
+
+        return files_created
+
     def _parse_code_body(self, body_element, name: str) -> Optional[str]:
         """Parse code body and detect format (ST, LD, CFC, etc.)"""
-        logger.info(f"=== Parsing code body for {name} ===")
+        logger.info(f"=== Parsing code body for Mermaid: {name} ===")
 
         # Check for ST code
         st_code = self.st_processor.extract_code(body_element, name)
         if st_code:
-            logger.info(f"Found ST code for {name}, length: {len(st_code)}")
-            return self.st_processor.convert_to_mermaid(st_code, name)
+            logger.info(f"Found ST code for {name}, length: {len(st_code)} characters")
+            if len(st_code) > 0:
+                return self.st_processor.convert_to_mermaid(st_code, name)
+            else:
+                logger.warning(f"ST code for {name} is empty (0 characters)")
 
         # Check for LD (Ladder Diagram)
         ld_code = self.ld_processor.extract_code(body_element, name)
@@ -120,21 +172,29 @@ class MermaidProcessor:
         logger.warning(f"No supported code format found for {name}")
         return None
 
-    def _convert_interface_to_mermaid(self, element, name: str, output_dir: str) -> list:
-        """Convert interface to Mermaid class diagram"""
-        files_created = []
+    def _create_diagnostic_mermaid(self, body_element, name: str) -> str:
+        """Create a diagnostic Mermaid diagram showing what was found"""
+        body_children = list(body_element)
+        child_tags = [child.tag for child in body_children]
 
-        interface = element.find(f"{self.namespace}interface")
-        if interface is not None:
-            mermaid_code = self._parse_interface(interface, name)
-            if mermaid_code:
-                filename = os.path.join(output_dir, f"{self._sanitize_filename(name)}_interface.mmd")
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(mermaid_code)
-                files_created.append(filename)
-                logger.debug(f"Created interface file: {filename}")
+        diagram = f"""flowchart TD
+    start["Diagnostic: {name}"]
+    body_found["Body Found: Yes"]
+    children["Children: {len(body_children)}"]
 
-        return files_created
+    start --> body_found
+    body_found --> children
+"""
+
+        for i, tag in enumerate(child_tags):
+            clean_tag = tag.replace(self.namespace, '')
+            diagram += f'    children --> child{i}["{clean_tag}"]\n'
+
+        diagram += f"\n%% Body analysis for {name}\n"
+        diagram += f"%% Children tags: {child_tags}\n"
+        diagram += f"%% Namespace: {self.namespace}\n"
+
+        return diagram
 
     def _parse_interface(self, interface_element, name: str) -> Optional[str]:
         """Parse POU interface and create Mermaid class diagram"""
@@ -174,6 +234,9 @@ class MermaidProcessor:
 
     def _get_type_name(self, type_element) -> str:
         """Extract type name from type element"""
+        if type_element is None:
+            return "Unknown"
+
         derived = type_element.find(f"{self.namespace}derived")
         if derived is not None:
             return derived.get('name', 'Unknown')
